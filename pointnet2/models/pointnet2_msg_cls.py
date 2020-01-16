@@ -18,11 +18,12 @@ def model_fn_decorator(criterion):
 
     def model_fn(model, data, epoch=0, eval=False):
         with torch.set_grad_enabled(not eval):
-            inputs, labels = data
+            inputs, position, labels = data
             inputs = inputs.to("cuda", non_blocking=True)
+            position = position.to("cuda", non_blocking=True)
             labels = labels.to("cuda", non_blocking=True)
 
-            preds = model(inputs)
+            preds = model(inputs, position)
             labels = labels.view(-1)
             loss = criterion(preds, labels)
 
@@ -83,25 +84,27 @@ class Pointnet2MSG(nn.Module):
             )
         )
         self.SA_modules.append(
-            PointnetSAModule(mlp=[128 + 256 + 256, 256, 512, 1024], use_xyz=use_xyz)
+            PointnetSAModule(
+                mlp=[128 + 256 + 256, 256, 512, 1024], use_xyz=use_xyz)
         )
 
         self.FC_layer = (
-            pt_utils.Seq(1024)
+            pt_utils.Seq(1027)
             .fc(512, bn=True)
             .dropout(0.5)
             .fc(256, bn=True)
             .dropout(0.5)
-            .fc(num_classes, activation=None)
+            .fc(num_classes, activation=nn.LogSoftmax())
         )
 
     def _break_up_pc(self, pc):
         xyz = pc[..., 0:3].contiguous()
-        features = pc[..., 3:].transpose(1, 2).contiguous() if pc.size(-1) > 3 else None
+        features = pc[..., 3:].transpose(
+            1, 2).contiguous() if pc.size(-1) > 3 else None
 
         return xyz, features
 
-    def forward(self, pointcloud):
+    def forward(self, pointcloud, position):
         # type: (Pointnet2MSG, torch.cuda.FloatTensor) -> pt_utils.Seq
         r"""
             Forward pass of the network
@@ -119,4 +122,6 @@ class Pointnet2MSG(nn.Module):
         for module in self.SA_modules:
             xyz, features = module(xyz, features)
 
-        return self.FC_layer(features.squeeze(-1))
+        x = torch.cat((features.squeeze(-1), position), dim=1)
+
+        return self.FC_layer(x)

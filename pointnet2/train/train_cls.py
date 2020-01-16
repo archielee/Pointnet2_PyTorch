@@ -10,16 +10,18 @@ import torch.optim as optim
 import torch.optim.lr_scheduler as lr_sched
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from torch.utils.data.sampler import SubsetRandomSampler
 from torchvision import transforms
 import etw_pytorch_utils as pt_utils
 import pprint
 import os.path as osp
 import os
 import argparse
+import numpy as np
 
 from pointnet2.models import Pointnet2ClsMSG as Pointnet
 from pointnet2.models.pointnet2_msg_cls import model_fn_decorator
-from pointnet2.data import ModelNet40Cls
+from pointnet2.data import CustomDataset
 import pointnet2.data.data_utils as d_utils
 
 torch.backends.cudnn.enabled = True
@@ -33,12 +35,13 @@ def parse_args():
     )
     parser.add_argument("-batch_size", type=int, default=16, help="Batch size")
     parser.add_argument(
-        "-num_points", type=int, default=4096, help="Number of points to train with"
+        "-num_points", type=int, default=750, help="Number of points to train with"
     )
     parser.add_argument(
         "-weight_decay", type=float, default=1e-5, help="L2 regularization coeff"
     )
-    parser.add_argument("-lr", type=float, default=1e-2, help="Initial learning rate")
+    parser.add_argument("-lr", type=float, default=1e-2,
+                        help="Initial learning rate")
     parser.add_argument(
         "-lr_decay", type=float, default=0.7, help="Learning rate decay gamma"
     )
@@ -65,6 +68,7 @@ def parse_args():
     )
     parser.add_argument("--visdom-port", type=int, default=8097)
     parser.add_argument("--visdom", action="store_true")
+    parser.add_argument("-data_dir", type=str, default="maps")
 
     return parser.parse_args()
 
@@ -87,34 +91,43 @@ if __name__ == "__main__":
         ]
     )
 
-    test_set = ModelNet40Cls(args.num_points, transforms=transforms, train=False)
-    test_loader = DataLoader(
-        test_set,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=2,
-        pin_memory=True,
-    )
+    num_envs = 100
+    num_views = 100
+    dataset = CustomDataset(args.data_dir, num_envs, num_views, 750)
 
-    train_set = ModelNet40Cls(args.num_points, transforms=transforms)
-    train_loader = DataLoader(
-        train_set,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=2,
-        pin_memory=True,
-    )
+    # Create data indices for training and validation splits
+    validation_split = .2
+    shuffle_dataset = True
+    random_seed = 42
+    dataset_size = len(dataset)
+    indices = list(range(dataset_size))
+    split = int(np.floor(validation_split * dataset_size))
+    if shuffle_dataset:
+        np.random.seed(random_seed)
+        np.random.shuffle(indices)
+    train_indices, val_indices = indices[split:], indices[:split]
 
-    model = Pointnet(input_channels=0, num_classes=40, use_xyz=True)
+    # Create data samplers and loaders:
+    train_sampler = SubsetRandomSampler(train_indices)
+    test_sampler = SubsetRandomSampler(val_indices)
+    test_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, pin_memory=True,
+                             num_workers=4, sampler=test_sampler)
+
+    train_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, pin_memory=True,
+                              num_workers=4, sampler=train_sampler)
+
+    model = Pointnet(input_channels=1, num_classes=8, use_xyz=True)
     model.cuda()
     optimizer = optim.Adam(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay
     )
-    lr_lbmd = lambda it: max(
+
+    def lr_lbmd(it): return max(
         args.lr_decay ** (int(it * args.batch_size / args.decay_step)),
         lr_clip / args.lr,
     )
-    bn_lbmd = lambda it: max(
+
+    def bn_lbmd(it): return max(
         args.bn_momentum
         * args.bnm_decay ** (int(it * args.batch_size / args.decay_step)),
         bnm_clip,
@@ -133,7 +146,8 @@ if __name__ == "__main__":
         if checkpoint_status is not None:
             it, start_epoch, best_loss = checkpoint_status
 
-    lr_scheduler = lr_sched.LambdaLR(optimizer, lr_lambda=lr_lbmd, last_epoch=it)
+    lr_scheduler = lr_sched.LambdaLR(
+        optimizer, lr_lambda=lr_lbmd, last_epoch=it)
     bnm_scheduler = pt_utils.BNMomentumScheduler(
         model, bn_lambda=bn_lbmd, last_epoch=it
     )
