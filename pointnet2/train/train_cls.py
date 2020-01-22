@@ -21,7 +21,7 @@ import numpy as np
 
 from pointnet2.models import Pointnet2ClsMSG as Pointnet
 from pointnet2.models.pointnet2_msg_cls import model_fn_decorator
-from pointnet2.data import CustomDataset
+from pointnet2.data import ActiveVisionDataset
 import pointnet2.data.data_utils as d_utils
 
 torch.backends.cudnn.enabled = True
@@ -93,7 +93,7 @@ if __name__ == "__main__":
 
     num_envs = 100
     num_views = 100
-    dataset = CustomDataset(args.data_dir, num_envs, num_views, 750)
+    dataset = ActiveVisionDataset(args.data_dir, num_envs, num_views, 750)
 
     # Create data indices for training and validation splits
     validation_split = .2

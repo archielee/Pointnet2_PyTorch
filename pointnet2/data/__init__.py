@@ -7,5 +7,4 @@ from __future__ import (
 )
 from .ModelNet40Loader import ModelNet40Cls
 from .Indoor3DSemSegLoader import Indoor3DSemSeg
-from .CustomDataset import CustomDataset
-from .Transformation import Transformation
+from .ActiveVisionDataset import ActiveVisionDataset

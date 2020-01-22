@@ -9,12 +9,11 @@ import torch
 import torch.utils.data as torch_data
 import numpy as np
 import os
-from .Transformation import Transformation
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-class CustomDataset(torch_data.Dataset):
+class ActiveVisionDataset(torch_data.Dataset):
     def __init__(self, root_dir, num_envs, num_views, num_pts):
         self.data_dir = os.path.join(root_dir)
         self.feature_dir = os.path.join(self.data_dir, 'features')
